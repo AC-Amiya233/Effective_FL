@@ -7,18 +7,41 @@ import pandas as pd
 import math
 import copy
 
+from matplotlib import pyplot as plt
+
+
+def allocate_data(dataset_size, usr_num, enable_random = False):
+    if not enable_random:
+        return [dataset_size / usr_num for i in range(usr_num)]
+    else:
+        return [dataset_size / usr_num for i in range(usr_num)]
+
+def generate_exec_time(usr_num, lo, hi) :
+    '''
+    [16.30823133 13.17435763 13.88474983 13.89481488 11.8644529  12.50021156
+     17.04035062  6.01753793 11.00694407 11.4797031  10.17031539 15.63348328
+     14.11423181 10.94848392 11.12879503  7.86005138  9.72729131 10.67684692
+     16.86756606 10.66194789]
+    '''
+    return np.random.normal((hi + lo) / 2, 3, usr_num)
+
 class Configs(object):
 
     def __init__(self):
 
         ## TODO For FL training
         self.data = 'mnist'
-        self.task_repeat_time = 5
+        self.task_repeat_time = 100
         self.rounds = 1    #todo change update batch
         self.frac = 1
-        self.user_num = 5
-        self.unit = 3
-        self.exec_speed = np.array([5, 1, 2, 1, 3])
+        self.user_num = 20
+        self.lo = 5
+        self.hi = 20
+        self.unit = 5
+        np.random.seed(0)
+        sample_num = self.unit
+        # self.exec_speed = np.array([10, 11, 14, 5, 7])
+        self.exec_speed = generate_exec_time(usr_num=self.user_num, lo=self.lo, hi=self.hi)
         self.FL_LR = 0.005
         self.model = 'cnn'
         self.iid = 0   # 0 = non-iid; 1 = iid
@@ -51,7 +74,7 @@ class Configs(object):
             # self.data_size = np.array([12000, 10000, 8000, 14000, 16000])
             # self.data_size = np.array([6000, 12000, 12000, 14000, 16000])
             # self.data_size = np.array([24000, 9000, 9000, 9000, 9000])
-            self.data_size = np.array([12000, 12000, 12000, 12000, 12000])
+            self.data_size = np.array(allocate_data(60000, usr_num=self.user_num))
             self.batch_size = 100
             theta_num = 21840
             self.D = (self.data_size / 10) * (32 * (theta_num + 10 * 28 * 28)) / 1e9
@@ -211,11 +234,7 @@ class Configs(object):
 #
 #
 if __name__ == '__main__':
-
-    np.random.seed(2)
-    configs = Configs()
-    E = configs.frequency * configs.frequency * configs.C * configs.D * configs.alpha
-    print(configs.user_num)
-    data = 0.001 * configs.data_size
-    print(E)
-    print(data)
+    temp = generate_exec_time(usr_num=20, lo=5, hi=20)
+    print(temp)
+    temp2 = allocate_data(60000, usr_num=20)
+    print(temp2)

@@ -382,7 +382,7 @@ class Env(object):
                 comb_list += list(itertools.combinations(np.arange(self.configs.unit), i))
             print('comb list: ', comb_list)
             print('comb list length: ', len(comb_list))
-
+            
             # all permutations: i.e. 5 usr = 120
             perm_list = []
             perm_list += list(itertools.permutations(np.arange(self.configs.unit), self.configs.unit))
@@ -465,6 +465,8 @@ class Env(object):
                 print("####  user sv  ####:", user_sv)
             # Our work done
 
+        task_acc = 0
+        task_loss = 0
         if self.configs.aggregation == 'sv':
             # TODO sv-based aggregation accuracy
             global_sv_weignts = sv_weights(self.local_weights, user_sv)
@@ -476,6 +478,7 @@ class Env(object):
             global_weights = average_weights(self.local_weights)
             self.global_model.load_state_dict(global_weights)
             test_acc, test_loss = test_inference(self.args, self.global_model, self.test_dataset)
+            task_acc, task_loss = test_acc, test_loss
             print('Avg Aggregation Test Accuracy: {:.2f}% \n'.format(100 * test_acc))
         print('[INFO] Step end')
 
@@ -557,7 +560,7 @@ class Env(object):
 
         self.index += 1
 
-        return self.user_groups_all, self.user_groups[self.configs.selected_client], user_sv
+        return self.user_groups_all, self.user_groups[self.configs.selected_client], user_sv, task_acc, task_loss
 
 
         # TODO     Env for Computing Time & State Transition & Reward Design
@@ -945,6 +948,9 @@ def Hand_control():
     # recording = pd.DataFrame([], columns=['state history', 'action history', 'reward history', 'acc increase hisotry', 'time hisotry', 'energy history', 'social welfare', 'accuracy', 'time', 'energy'])
     sv = [0 for i in range(env.configs.user_num)]
     latest_participant = [-1 for i in range(env.configs.user_num)]
+    sv_acc = []
+    sv_loss = []
+    sv_cost = []
     for i in range(configs.task_repeat_time):
         print("####### This is the {} repeat task ########".format(i))
         cur_bid = env.reset()
@@ -957,10 +963,21 @@ def Hand_control():
             for s in selected:
                 latest_participant[s] = i
                 local_ep_list[s] = 1
-
             action = np.array(local_ep_list)/5
             # print(action)
-            all_idx, selected_idx_list, selected_user_sv = env.step(action, t)
+            all_idx, selected_idx_list, selected_user_sv, acc, loss = env.step(action, t)
+
+            sv_acc.append(acc)
+            print('[INFO] Accuracy: {}'.format(sv_acc))
+            sv_loss.append(loss)
+            print('[INFO] Loss: {}'.format(sv_loss))
+            cost = 0
+            for i in selected:
+                if cost < env.configs.exec_speed[i]:
+                    cost = env.configs.exec_speed[i]
+            sv_cost.append(cost if len(sv_cost) == 0 else sv_cost[-1] + cost)
+            print('[INFO] Cost: {}'.format(sv_cost))
+
             # print("The lenth of all_idx {} is {}:".format(all_idx, len(all_idx)))
             # print("The lenth of selected_idx_list {} is {}:".format(selected_idx_list, len(selected_idx_list)))
             print("The lenth of sv {} is {}:".format(selected_user_sv, len(selected_user_sv)))
@@ -970,7 +987,13 @@ def Hand_control():
         json_save = json.dumps(all_idx_sv_dict)
         with open('task500.json', 'w') as json_file:
             json_file.write(json_save)
-
+    plt.subplot(3, 1, 1)
+    plt.plot(sv_cost, sv_acc, color = 'red', linestyle = '--', marker='x')
+    plt.title('Cost & Acc')
+    plt.subplot(3, 1, 3)
+    plt.plot(sv_cost, sv_loss, color = 'red', linestyle = '--', marker='o')
+    plt.title('Cost & Loss')
+    plt.show()
     # TODO waiting for data storage
     # recording = recording.append([{'state history': state_list, 'action history': action_list, 'reward history':reward_list, 'acc increase hisotry': performance_increase_list, 'time hisotry': time_list, 'energy history': energy_list, 'social welfare': np.sum(reward_list), 'accuracy': np.sum(performance_increase_list), 'time': np.sum(time_list), 'energy': np.sum(energy_list)}])
     # recording.to_csv('Hand_control_result.csv')
