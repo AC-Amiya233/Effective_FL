@@ -10,6 +10,7 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt        #matplotlib inline
+from matplotlib.ticker import MaxNLocator
 import csv
 
 import torch
@@ -330,7 +331,7 @@ class Env(object):
         return result_book.sort_values('reward').iloc[-1]['action'], result_book.sort_values('reward').iloc[-1]['reward'], result_book.sort_values('reward').iloc[-1]['accuracy'], result_book.sort_values('reward').iloc[-1]['cost'], result_book.sort_values('reward').iloc[-1]['energy']
 
     def step(self, action, round):
-        print('[INFO] Step Start')
+        print('[STEP] Step Start')
         self.local_weights, self.local_losses = [], []
         print(f'\n | Global Training Round : {self.index + 1} |\n')
         self.global_model.train()
@@ -340,15 +341,8 @@ class Env(object):
         # TODO DRL
         action = 5 * action
         action = action.astype(int)
-
-        # TODO FedAvg
-        # tep = 3
-        # action = np.array([tep, tep, tep, tep, tep])
-
         self.local_ep_list = action
 
-
-        #TODO single thread
         for idx in idxs_users:
             local_ep = self.local_ep_list[list(idxs_users).index(idx)]
             print('[INNER INFO] Usr {} exec local update? {}'.format(idx, local_ep != 0))
@@ -360,116 +354,58 @@ class Env(object):
                     model=copy.deepcopy(self.global_model), global_round=self.index, local_ep=local_ep)
                 self.local_weights.append(copy.deepcopy(w))
                 self.local_losses.append(copy.deepcopy(loss))
-
-        # Todo this part is for test, compare the 80% data result to all data. Please delete it in normal training with sv
-        # global_weights = average_weights(self.local_weights)
-        # self.global_model.load_state_dict(global_weights)
-        # test_acc, test_loss = test_inference(self.args, self.global_model, self.test_dataset)
-        # print('Avg Aggregation Test Accuracy: {:.2f}% \n'.format(100 * test_acc))
-
-        # print('\t[INFO] Global weights count: {}'.format(len(self.local_weights)))
-        # print('\t[INFO] Global losses count: {}'.format(len(self.local_losses)))
-
         # Shapley Value:
-        user_sv = []
-        if round == self.configs.rounds - 1:   # perform sv calculation in the last round
-            print("----------------------------------")
-            print("Start Shapley Value Part")
-            print("----------------------------------")
-            # all combinations of all users without themselves
-            comb_list = []
-            for i in range(self.configs.unit):
-                comb_list += list(itertools.combinations(np.arange(self.configs.unit), i))
-            print('comb list: ', comb_list)
-            print('comb list length: ', len(comb_list))
-            
+        acc_diff = {i:[] for i in range(self.configs.unit)}
+        sv = []
+        threshold = 12
+        if self.configs.baseline != 0:
+            print("[CRITIC] Start Shapley Value Part")
             # all permutations: i.e. 5 usr = 120
             perm_list = []
             perm_list += list(itertools.permutations(np.arange(self.configs.unit), self.configs.unit))
-            # print('permutations list: ', perm_list)
-            # print('permutations list length: ', len(perm_list))
+            print('[INFO] Permutations list: ', perm_list)
+            print('[INFO] Permutations list length: ', len(perm_list))
+            print('[INFO] Select first {} as sample'.format(self.configs.R))
 
-            # find the combinations of each user without itself
-            for i in range(self.configs.unit):  # i: user index
-                comb_without_user = []
-                comb_with_user = []
-                for j in range(len(comb_list)):  # j: combination index
-                    if i not in comb_list[j]:
-                        comb_without_user.append(list(comb_list[j]))  # the combination of user i without itself
-                        temp = list(comb_list[j])
-                        temp.append(i)
-                        comb_with_user.append(sorted(temp))  # the combination of user i with itself
-                print("comb_without_user:", comb_without_user)
-                print("comb_with_user:", comb_with_user)
-
-                # calculate the avg model of each combination with/without user
-                avg_comb_model_with = []
-                avg_comb_model_without = []
-
-                for comb in comb_without_user:  # calculate the avg model list of combs without user i
-                    if comb != []:
-                        comb_model_list = []
-                        for idx in comb:
-                            comb_model_list.append(self.local_weights[idx])
-                        avg_model_temp = average_weights(comb_model_list)
-                        avg_comb_model_without.append(avg_model_temp)
-                # The avg_comb_model_without here not include the first null [] comb
-
-                for comb in comb_with_user:  # calculate the avg model list of combs with user i
-                    comb_model_list = []
-                    for idx in comb:
-                        comb_model_list.append(self.local_weights[idx])
-                    avg_model_temp = average_weights(comb_model_list)
-                    avg_comb_model_with.append(avg_model_temp)
-
-
-                # calculate the test acc of each combination with/without user
-                comb_acc_with = []
-                comb_acc_without = [0.1]  # random network for the first null [] comb have 10% acc on MNIST
-
-                for model in avg_comb_model_without:
-                    self.global_model.load_state_dict(model)
-                    test_acc, test_loss = test_inference(self.args, self.global_model, self.test_dataset)
-                    comb_acc_without.append(test_acc)
-
-
-                for model in avg_comb_model_with:
-                    self.global_model.load_state_dict(model)
-                    test_acc, test_loss = test_inference(self.args, self.global_model, self.test_dataset)
-                    comb_acc_with.append(test_acc)
-
-                print("comb_acc_without:", comb_acc_without)
-                print("comb_acc_with:", comb_acc_with)
-
-                # calculate the shapley value of user i
-                # weight in sv calculation, when user_num = 5 todo need to be modified after change
-                weight_list = [1, 4, 6, 4, 1]
-                len_count = [1, 5, 11, 15, 16]
-                count = 0
-                sv = 0
-                delta_acc = np.zeros(len(comb_acc_with))
-                for k in range(len(comb_acc_with)):
-                    delta_acc[k] = comb_acc_with[k] - comb_acc_without[k]
-                    if k < 1:
-                        sv += 1 * delta_acc[k]
-                    elif k >= 1 and k < 5:
-                        sv += 1/4 * delta_acc[k]
-                    elif k >= 5 and k < 11:
-                        sv += 1/6 * delta_acc[k]
-                    elif k >= 11 and k < 15:
-                        sv += 1/4 * delta_acc[k]
-                    else:
-                        sv += 1 * delta_acc[k]
-
-                user_sv.append(sv)
-                print("####  user sv  ####:", user_sv)
-            # Our work done
-
-        task_acc = 0
-        task_loss = 0
+            # TODO random select configs.R permutations
+            empty_acc, empty_loss = test_inference(self.args, self.global_model, self.test_dataset)
+            print('[INFO] Empty Accuracy {}'.format(empty_acc * 100))
+            np.random.seed(int(time.time()))
+            r_perm_index = np.random.choice([i for i in range(len(perm_list))], self.configs.R, replace = False)
+            r_perm = []
+            for i in r_perm_index:
+                r_perm.append(perm_list[i])
+            # r_perm = random.sample(perm_list, self.configs.R)
+            print('[INFO] R random permutations {}'.format(r_perm))
+            for i in r_perm:
+                seq = list(i)
+                # initialize
+                queue = []
+                accuracies = [empty_acc]
+                loss = []
+                queue_weights = []
+                print('[INFO] Processing {}'.format(seq))
+                for item in seq:
+                    queue.append(item)
+                    # print('[MID-INFO] Queue {}'.format(queue))
+                    queue_weights.append(self.local_weights[item])
+                    # print('[MID-INFO] Queue weights({}) {}'.format(len(queue_weights), '...'))
+                    avg = average_weights(queue_weights)
+                    self.global_model.load_state_dict(avg)
+                    queue_acc, queue_loss = test_inference(self.args, self.global_model, self.test_dataset)
+                    print('[SUB-INFO] {} contributes {}'.format(item, 100*(queue_acc - accuracies[-1])))
+                    acc_diff[item].append(queue_acc - accuracies[-1])
+                    accuracies.append(queue_acc)
+                    loss.append(queue_loss)
+            # Avg sv
+            for i in range(self.configs.unit):
+                sv.append(np.mean(acc_diff[i]))
+            print('[INFO] SV({}): {}'.format(len(sv), sv))
+            task_acc = 0
+            task_loss = 0
         if self.configs.aggregation == 'sv':
             # TODO sv-based aggregation accuracy
-            global_sv_weignts = sv_weights(self.local_weights, user_sv)
+            global_sv_weignts = sv_weights(self.local_weights, sv)
             self.global_model.load_state_dict(global_sv_weignts)
             sv_test_acc, sv_test_loss = test_inference(self.args, self.global_model, self.test_dataset)
             print('SV-based Aggregation Test Accuracy: {:.2f}% \n'.format(100 * sv_test_acc))
@@ -480,158 +416,9 @@ class Env(object):
             test_acc, test_loss = test_inference(self.args, self.global_model, self.test_dataset)
             task_acc, task_loss = test_acc, test_loss
             print('Avg Aggregation Test Accuracy: {:.2f}% \n'.format(100 * test_acc))
-        print('[INFO] Step end')
-
-        # # TODO multi-thread
-        # thread_list = []
-        # for idx in idxs_users:
-        #     thread = threading.Thread(target=self.individual_train, args=(idx,))
-        #     thread_list.append(thread)
-        #     thread.start()
-        #
-        # for i in thread_list:
-        #     i.join()
-
-
-
-        # # update global weights
-        # global_weights = average_weights(self.local_weights)
-        #
-        # # print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        # # print(global_weights)
-        #
-        # # update global weights
-        # self.global_model.load_state_dict(global_weights)
-        #
-        # loss_avg = sum(self.local_losses) / len(self.local_losses)
-        # self.train_loss.append(loss_avg)
-        #
-        # # Calculate avg training accuracy over all users at every epoch
-        # list_acc, list_loss = [], []
-        # # From now on, set the model to evaluation
-        # self.global_model.eval()
-        #
-        # for idx in idxs_users:
-        #     local_model = LocalUpdate(args=self.args, dataset=self.train_dataset,
-        #                               idxs=self.user_groups[idx], logger=self.logger)
-        #     acc, loss = local_model.inference(model=self.global_model)
-        #     list_acc.append(acc)
-        #     list_loss.append(loss)
-        #
-        # self.train_accuracy.append(sum(list_acc) / len(list_acc))
-        #
-        # # print global training loss after every 'i' rounds
-        #
-        # # delta_acc = np.mean(np.array(self.train_accuracy)) - self.acc_before
-        # # self.acc_before = np.mean(np.array(self.train_accuracy))
-        #
-        #
-        # if (self.index + 1) % self.print_every == 0:
-        #     print(f' \nAvg Training Stats after {self.index+ 1} global rounds:')
-        #     # print(f'Training Loss : {np.mean(np.array(self.train_loss))}')
-        #     # print('Train Accuracy: {:.2f}% \n'.format(100 * np.mean(np.array(self.train_accuracy))))
-        #     print(f'Training Loss : {self.train_loss[-1]}')
-        #     print('Train Accuracy: {:.2f}% \n'.format(100 * self.train_accuracy[-1]))
-        #
-        #
-        # # TODO    test accuracy
-        #
-        # test_acc, test_loss = test_inference(self.args, self.global_model, self.test_dataset)
-        # self.test_accuracy.append(test_acc)
-        # self.test_loss.append(test_loss)
-        #
-        # print('Test Accuracy: {:.2f}% \n'.format(100 * self.test_accuracy[-1]))
-        #
-        # delta_acc = self.test_accuracy[-1] - self.acc_before
-        # self.acc_before = self.test_accuracy[-1]
-        #
-        # delta_loss = self.loss_before - self.test_loss[-1]
-        # self.loss_before = self.test_loss[-1]
-        # print("Loss:", self.test_loss[-1], "Loss increment:", delta_loss)
-        # print("Accuracy:", self.test_accuracy[-1], "Accuracy increment:", delta_acc)
-        #
-        # # test_acc, test_loss = test_inference(self.args, self.global_model, self.test_dataset)
-        # # delta_acc = test_acc - self.test_acc_before # acc increment for reward
-        # # self.test_acc_before = test_acc
-        # #
-        # # print(f' \nAvg Training Stats after {self.index + 1} global rounds:')
-        # # print(f'Test Loss: {test_loss}')
-        # # print('Test Accuracy: {:.2f}% \n'.format(100 * test_acc))
-
+        print('[STEP] Step end')
         self.index += 1
-
-        return self.user_groups_all, self.user_groups[self.configs.selected_client], user_sv, task_acc, task_loss
-
-
-        # TODO     Env for Computing Time & State Transition & Reward Design
-
-        # time_cmp = (action * self.D * self.C) / self.frequency
-        # # print("Computing Time:", time_cmp)
-        #
-        # time_global = np.max(time_cmp)
-        # # print("Global Time:", time_global)
-        #
-        # # E = configs.frequency * configs.frequency * configs.C * configs.D * configs.alpha
-        # # E = E * action
-        # # E = np.sum(E)
-        #
-        # data_value_sum = np.dot(action, self.data_value)
-        # # print("Sum Data Value:", data_value_sum)
-        #
-        # E = np.dot(action, self.unit_E)
-        # # print("Energy:", E)
-        #
-        # cost = data_value_sum + E
-        # # print("cost:", cost)
-        #
-        #
-        # if self.configs.performance == 'acc':
-        #     delta_performance = delta_acc
-        # else:
-        #     delta_performance = delta_loss
-        # # reward = (self.lamda * delta_acc - payment - time_global) / 10   #TODO reward percentage need to be change
-        # reward = (self.lamda * delta_performance - cost)/10 #TODO test for the existance of data importance
-        # # print("Scaling Reward:", reward)
-        # # print("------------------------------------------------------------------------")
-        #
-        # # todo state transition here
-        #
-        # # print("########################################################################")
-        # # print("Action History:", self.action_history)
-        # history_cut = self.action_history[-3:]
-        # # print("History Cut:", history_cut)
-        # history_avg = np.mean(history_cut, axis=0)
-        # # print("history_avg:", history_avg)
-        #
-        # # print("Data Value before:", self.data_value)
-        # sign_add = action > history_avg
-        # # print("Sign Add:", sign_add)
-        # sign_reduce = action < history_avg
-        # # print("Sign Reduce:", sign_reduce)
-        # self.data_value = self.data_value * sign_add * 0.1 - self.data_value * sign_reduce * 0.1 + self.data_value
-        # # print("Data Value after:", self.data_value)
-        #
-        # self.bid_ = self.data_value + self.unit_E
-        # # print("Bid:", self.bid)
-        # # print("Next Bid:", self.bid_)
-        #
-        # # for i in range(self.bid.size):
-        # #
-        # #     if action[i] > history_avg[i]:
-        # #         self.bid_[i] = 1.1 * self.bid[i]
-        # #     elif action[i] < history_avg[i]:
-        # #         self.bid_[i] = 0.9 * self.bid[i]
-        # #     else:
-        # #         self.bid_[i] = self.bid[i]
-        #
-        # self.bid = self.bid_
-        #
-        # # return reward, self.bid, delta_performance, cost, time_global, action, E
-
-
-
-
-# TODO  The above is Environment
+        return sv, task_acc, task_loss
 
 
 def fed_avg():
@@ -920,6 +707,8 @@ def select_participant(total: int, select: int, latest_participant: list, enable
         print('[INFO] Explore {}'.format(explore))
         silence = [i for i, x in enumerate(latest_participant) if x == -1]
         print('[INFO] Client not be selected {}'.format(silence))
+        explored = [i for i in range(0, total) if i not in silence]
+        print('[INFO] Client has been selected {}'.format(explored))
         if len(silence) == 0:
             # nothing left
             print('[INFO] All clients are participants')
@@ -943,14 +732,15 @@ def select_participant(total: int, select: int, latest_participant: list, enable
 def Hand_control():
     configs = Configs()
     env = Env(configs)
-    # random.seed(env.seed)
-    all_idx_sv_dict = {}
-    # recording = pd.DataFrame([], columns=['state history', 'action history', 'reward history', 'acc increase hisotry', 'time hisotry', 'energy history', 'social welfare', 'accuracy', 'time', 'energy'])
-    sv = [0 for i in range(env.configs.user_num)]
+    sv = [1 for i in range(env.configs.user_num)]
     latest_participant = [-1 for i in range(env.configs.user_num)]
     sv_acc = []
     sv_loss = []
     sv_cost = []
+    # alpha * past + beta * current
+    alpha = 0.75
+    beta = 0.25
+    threshold = 12
     for i in range(configs.task_repeat_time):
         print("####### This is the {} repeat task ########".format(i))
         cur_bid = env.reset()
@@ -963,10 +753,9 @@ def Hand_control():
             for s in selected:
                 latest_participant[s] = i
                 local_ep_list[s] = 1
-            action = np.array(local_ep_list)/5
+            action = np.array(local_ep_list) / 5
             # print(action)
-            all_idx, selected_idx_list, selected_user_sv, acc, loss = env.step(action, t)
-
+            selected_user_sv, acc, loss = env.step(action, t)
             sv_acc.append(acc)
             print('[INFO] Accuracy: {}'.format(sv_acc))
             sv_loss.append(loss)
@@ -981,19 +770,36 @@ def Hand_control():
             # print("The lenth of all_idx {} is {}:".format(all_idx, len(all_idx)))
             # print("The lenth of selected_idx_list {} is {}:".format(selected_idx_list, len(selected_idx_list)))
             print("The lenth of sv {} is {}:".format(selected_user_sv, len(selected_user_sv)))
-            for index in range(len(selected)):
-                sv[selected[index]] = selected_user_sv[index] / env.configs.exec_speed[selected[index]]
-            print('[INFO] effective sensitive sv {}'.format(sv))
-        json_save = json.dumps(all_idx_sv_dict)
-        with open('task500.json', 'w') as json_file:
-            json_file.write(json_save)
-    plt.subplot(3, 1, 1)
-    plt.plot(sv_cost, sv_acc, color = 'red', linestyle = '--', marker='x')
-    plt.title('Cost & Acc')
-    plt.subplot(3, 1, 3)
-    plt.plot(sv_cost, sv_loss, color = 'red', linestyle = '--', marker='o')
-    plt.title('Cost & Loss')
+            if env.configs.baseline == 1:
+                for index in range(len(selected)):
+                    sv[selected[index]] = selected_user_sv[index] * alpha + sv[selected[index]] * beta
+                print('[INFO] Only SV {}'.format(sv))
+            elif env.configs.baseline == 2:
+                for index in range(len(selected)):
+                    sv[selected[index]] = (selected_user_sv[index] * alpha + sv[selected[index]] * beta) / env.configs.exec_speed[selected[index]] * threshold
+                print('[INFO] SV with time concern {}'.format(sv))
+            else:
+                pass
+    fig1 = plt.figure('Fig 1', figsize=(20, 10))
+    ax1 = fig1.add_subplot(1, 2, 1)
+    ax1.plot(np.arange(1, env.configs.rounds + 1).astype(dtype=np.str), sv_acc, color='red', linestyle='--', marker='x')
+    ax1.set_title('SV Accuracy')
+    ax1.set_xlabel('Round')
+    ax1.set_ylabel('Accuracy')
+    ax2 = fig1.add_subplot(1, 2, 2)
+    ax2.plot(np.arange(1, env.configs.rounds + 1).astype(dtype=np.str), sv_cost, color='red', linestyle='--', marker='o')
+    ax2.set_title('SV Time Cost')
+    ax2.set_xlabel('Round')
+    ax2.set_ylabel('Time Cost')
+
     plt.show()
+
+    df_cost = pd.DataFrame(sv_cost)
+    df_cost.to_csv('v1_sv_cost.csv')
+    df_accuracy = pd.DataFrame(sv_acc)
+    df_accuracy.to_csv('v1_sv_accuracy.csv')
+    df_loss = pd.DataFrame(sv_loss)
+    df_loss.to_csv('v1_sv_loss.csv')
     # TODO waiting for data storage
     # recording = recording.append([{'state history': state_list, 'action history': action_list, 'reward history':reward_list, 'acc increase hisotry': performance_increase_list, 'time hisotry': time_list, 'energy history': energy_list, 'social welfare': np.sum(reward_list), 'accuracy': np.sum(performance_increase_list), 'time': np.sum(time_list), 'energy': np.sum(energy_list)}])
     # recording.to_csv('Hand_control_result.csv')
