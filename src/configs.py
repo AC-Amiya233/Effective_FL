@@ -23,6 +23,20 @@ def generate_exec_time(usr_num, lo, hi) :
      14.11423181 10.94848392 11.12879503  7.86005138  9.72729131 10.67684692
      16.86756606 10.66194789]
     '''
+    '''
+    [10.29325962  9.58373717 11.17336321 13.10025392 12.28072808 12.34930587
+     14.36761575  7.03886069 11.27945065 19.6871113  12.6369494  13.15345891
+     11.78414753 20.8101589  11.41113623 11.98350933 15.68428675 11.69254895
+     17.49058905  7.0972756 ]
+    '''
+    '''
+    2:
+    [11.24972646 12.33119952  6.09141171 17.42081243  7.11969324  9.9747579
+     14.00864425  8.76413574  9.32614334  9.77297716 14.15436213 19.37662404
+     12.62461818  9.14622366 14.11717496 10.7115209  12.44260851 16.02500366
+     10.25638715 12.52707575]
+    '''
+    np.random.seed(2)
     return np.random.normal((hi + lo) / 2, 3, usr_num)
 
 class Configs(object):
@@ -31,14 +45,16 @@ class Configs(object):
 
         ## TODO For FL training
         self.data = 'mnist'
-        self.task_repeat_time = 100
-        self.rounds = 1    #todo change update batch
+        self.task_repeat_time = 1
+        self.rounds = 20
+        self.sv_computation_round = [i * 10 - 1 for i in range(1, int(self.rounds / 10) + 1)]
         self.frac = 1
-        self.user_num = 20
+        self.user_num = 10
+        self.unit = 5
         self.lo = 5
         self.hi = 20
-        self.unit = 5
-        np.random.seed(0)
+        self.R = 3 * self.unit
+        self.baseline = 1 # 0 - random, 1 - sv only, 2 - sv + time
         sample_num = self.unit
         # self.exec_speed = np.array([10, 11, 14, 5, 7])
         self.exec_speed = generate_exec_time(usr_num=self.user_num, lo=self.lo, hi=self.hi)

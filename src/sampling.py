@@ -65,6 +65,7 @@ def mnist_noniid(dataset, num_users):
         for rand in rand_set:
             dict_users[i] = np.concatenate(
                 (dict_users[i], idxs[rand*num_imgs:(rand+1)*num_imgs]), axis=0)
+    print(dict_users)
     return dict_users
 
 
