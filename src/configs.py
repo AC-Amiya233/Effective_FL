@@ -46,7 +46,7 @@ class Configs(object):
         ## TODO For FL training
         self.data = 'mnist'
         self.task_repeat_time = 1
-        self.rounds = 20
+        self.rounds = 50
         self.sv_computation_round = [i * 10 - 1 for i in range(1, int(self.rounds / 10) + 1)]
         self.frac = 1
         self.user_num = 10
@@ -54,7 +54,8 @@ class Configs(object):
         self.lo = 5
         self.hi = 20
         self.R = 3 * self.unit
-        self.baseline = 1 # 0 - random, 1 - sv only, 2 - sv + time
+        # self.R = 1
+        self.baseline = 2 # 0 - random, 1 - sv only, 2 - sv + time
         sample_num = self.unit
         # self.exec_speed = np.array([10, 11, 14, 5, 7])
         self.exec_speed = generate_exec_time(usr_num=self.user_num, lo=self.lo, hi=self.hi)
