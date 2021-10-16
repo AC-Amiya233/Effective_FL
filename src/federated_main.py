@@ -696,7 +696,9 @@ def select_participant(total: int, select: int, latest_participant: list, enable
     if not enable_sv :
         # random select
         print('[INFO] Random select active')
-        return random.sample(range(0, total), select)
+        np.random.seed(int(time.time()))
+        random_index = np.random.choice([i for i in range(total)], select, replace=False)
+        return random_index
     else :
         print('[INFO] SV select active')
         # enable sv select
@@ -709,25 +711,33 @@ def select_participant(total: int, select: int, latest_participant: list, enable
         print('[INFO] Client not be selected {}'.format(silence))
         explored = [i for i in range(0, total) if i not in silence]
         print('[INFO] Client has been selected {}'.format(explored))
+        explored_sv = [sv[index] for index in explored]
         if len(silence) == 0:
             # nothing left
             print('[INFO] All clients are participants')
-            return list(map(sv.index, heapq.nlargest(select, sv)))
+            return heapq.nlargest(select, range(len(sv)), sv.__getitem__)
         else:
             print('[INFO] Still has client not is a participant')
             max_num_index_list = []
-            if len(silence) < explore:
-                max_num_index_list = heapq.nlargest(exploit + explore - len(silence), range(len(sv)), sv.__getitem__)
-                print('[INFO] Get top sv clients: {}'.format(max_num_index_list))
-                return max_num_index_list + silence
-            else :
-                max_num_index_list = heapq.nlargest(exploit, range(len(sv)), sv.__getitem__)
-                print('[INFO] Get top sv clients: {}'.format(max_num_index_list))
-                temp1 = set(silence)
-                temp2 = set(max_num_index_list)
-                diff = temp1.difference(temp2)
-                explore_list = list(diff)[:explore]
-                return max_num_index_list + explore_list
+            if len(explored) == 0:
+                np.random.seed(int(time.time()))
+                random_index = np.random.choice([i for i in range(total)], select, replace=False)
+                return random_index
+            else:
+                if len(silence) < explore:
+                    fake_max_num_index_list = heapq.nlargest(exploit + explore - len(silence), range(len(explored_sv)), explored_sv.__getitem__)
+                    max_num_index_list = [explored[index] for index in fake_max_num_index_list]
+                    print('[INFO] Get top {} sv clients: {}'.format(exploit + explore - len(silence), max_num_index_list))
+                    return max_num_index_list + silence
+                else :
+                    fake_max_num_index_list = heapq.nlargest(exploit, range(len(explored_sv)), explored_sv.__getitem__)
+                    max_num_index_list = [explored[index] for index in fake_max_num_index_list]
+                    print('[INFO] Get top {} sv clients: {}'.format(exploit, max_num_index_list))
+                    temp1 = set(silence)
+                    temp2 = set(max_num_index_list)
+                    diff = temp1.difference(temp2)
+                    explore_list = list(diff)[:explore]
+                    return max_num_index_list + explore_list
 
 def Hand_control():
     configs = Configs()
@@ -747,7 +757,7 @@ def Hand_control():
         for t in range(configs.rounds):
             # for each round set the init participant to zero
             local_ep_list = [0 for i in range(env.configs.user_num)]
-            selected = select_participant(env.configs.user_num, env.configs.unit, latest_participant, True, sv)
+            selected = select_participant(env.configs.user_num, env.configs.unit, latest_participant, env.configs.baseline != 0, sv)
             print('[INFO] Selected usr info: {}'.format(selected))
             # update participant info
             for s in selected:
@@ -772,34 +782,62 @@ def Hand_control():
             print("The lenth of sv {} is {}:".format(selected_user_sv, len(selected_user_sv)))
             if env.configs.baseline == 1:
                 for index in range(len(selected)):
-                    sv[selected[index]] = selected_user_sv[index] * alpha + sv[selected[index]] * beta
+                    sv[selected[index]] = selected_user_sv[index] * beta + sv[selected[index]] * alpha
                 print('[INFO] Only SV {}'.format(sv))
             elif env.configs.baseline == 2:
                 for index in range(len(selected)):
-                    sv[selected[index]] = (selected_user_sv[index] * alpha + sv[selected[index]] * beta) / env.configs.exec_speed[selected[index]] * threshold
+                    if env.configs.exec_speed[selected[index]] > threshold:
+                        sv[selected[index]] = (selected_user_sv[index] * beta + sv[selected[index]] * alpha) / env.configs.exec_speed[selected[index]] * threshold
+                else:
+                    sv[selected[index]] = selected_user_sv[index] * beta + sv[selected[index]] * alpha
                 print('[INFO] SV with time concern {}'.format(sv))
             else:
                 pass
-    fig1 = plt.figure('Fig 1', figsize=(20, 10))
+
+    cost_path = ''
+    accuracy_path = ''
+    loss_path = ''
+    acc_title = ''
+    cost_title = ''
+    if env.configs.baseline == 0:
+        cost_path = 'random_cost.csv'
+        accuracy_path = 'random_accuracy.csv'
+        loss_path = 'random_loss.csv'
+        acc_title = 'Random Accuracy'
+        cost_title = 'Random Cost'
+    elif env.configs.baseline == 1:
+        cost_path = 'sv_cost.csv'
+        accuracy_path = 'sv_accuracy.csv'
+        loss_path = 'sv_loss.csv'
+        acc_title = 'SV Accuracy'
+        cost_title = 'SV Cost'
+    else:
+        cost_path = 'sv_time_cost.csv'
+        accuracy_path = 'sv_time_accuracy.csv'
+        loss_path = 'sv_time_loss.csv'
+        acc_title = 'SV+Time Accuracy'
+        cost_title = 'SV+Time Cost'
+
+    fig1 = plt.figure('Fig 1', figsize=(60, 10))
     ax1 = fig1.add_subplot(1, 2, 1)
     ax1.plot(np.arange(1, env.configs.rounds + 1).astype(dtype=np.str), sv_acc, color='red', linestyle='--', marker='x')
-    ax1.set_title('SV Accuracy')
+    ax1.set_title(acc_title)
     ax1.set_xlabel('Round')
     ax1.set_ylabel('Accuracy')
     ax2 = fig1.add_subplot(1, 2, 2)
     ax2.plot(np.arange(1, env.configs.rounds + 1).astype(dtype=np.str), sv_cost, color='red', linestyle='--', marker='o')
-    ax2.set_title('SV Time Cost')
+    ax2.set_title(cost_title)
     ax2.set_xlabel('Round')
     ax2.set_ylabel('Time Cost')
 
     plt.show()
 
     df_cost = pd.DataFrame(sv_cost)
-    df_cost.to_csv('v1_sv_cost.csv')
+    df_cost.to_csv(cost_path)
     df_accuracy = pd.DataFrame(sv_acc)
-    df_accuracy.to_csv('v1_sv_accuracy.csv')
+    df_accuracy.to_csv(accuracy_path)
     df_loss = pd.DataFrame(sv_loss)
-    df_loss.to_csv('v1_sv_loss.csv')
+    df_loss.to_csv(loss_path)
     # TODO waiting for data storage
     # recording = recording.append([{'state history': state_list, 'action history': action_list, 'reward history':reward_list, 'acc increase hisotry': performance_increase_list, 'time hisotry': time_list, 'energy history': energy_list, 'social welfare': np.sum(reward_list), 'accuracy': np.sum(performance_increase_list), 'time': np.sum(time_list), 'energy': np.sum(energy_list)}])
     # recording.to_csv('Hand_control_result.csv')
